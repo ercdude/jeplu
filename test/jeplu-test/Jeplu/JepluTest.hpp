@@ -5,6 +5,7 @@
 
 #include "gtest/gtest.h"
 
+#include "QCustomAdapter.hpp"
 #include "Jeplu.hpp"
 
 /**
@@ -13,10 +14,7 @@
 class JepluTest : public ::testing::Test
 {
 protected:
-    // You can remove any or all of the following functions if its body
-    // is empty.
-
-    JepluTest()
+    JepluTest() : _pluginsPath("plugins/")
     {
         // You can do set-up work for each test here.
     }
@@ -40,20 +38,37 @@ protected:
         // before the destructor).
     }
 
-    // Objects declared here can be used by all tests in the test case for Foo.
+    /**
+     *  \brief The jeplu object.
+     */
     Jeplu _jeplu;
+
+    /**
+     *  \brief Holds the path that contains the plugins.
+     */
+    std::string _pluginsPath;
 };
 
 TEST_F(JepluTest, initJeplu)
 {
-    ASSERT_EQ(0, _jeplu.init("plugins/"));
+    ASSERT_EQ(JepluErrs::OK, _jeplu.init(_pluginsPath));
 }
 
 TEST_F(JepluTest, checkPluginIsEmpty)
 {
-    _jeplu.init("plugins/");
+    _jeplu.init(_pluginsPath);
 
     ASSERT_EQ(false, _jeplu.hasLoadedPlugins());
+}
+
+TEST_F(JepluTest, testAdapter)
+{
+    std::shared_ptr<QCustomAdapter> adapter = std::make_shared<QCustomAdapter>();
+
+    _jeplu.registerAdapter(adapter);
+    _jeplu.init(_pluginsPath);
+
+    ASSERT_EQ(true ,adapter->hasPluginsLoaded());
 }
 
 #endif //JEPLUTEST_HPP

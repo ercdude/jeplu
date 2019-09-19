@@ -1,14 +1,26 @@
 #include "Jeplu.hpp"
 
-#ifdef __linux__
-    #include "DlLoader.hpp"
-#endif
 #include "PluginManager.hpp"
 #include "PluginFactory.hpp"
-#include "QtLoader.hpp"
-#include "JepluLibFinder.hpp"
+
+// Check if DlLoader should be added.
+#if defined(__linux__) && !defined(NO_DL_LOADER)
+    #define USE_DL_LOADER
+    #include "DlLoader.hpp"
+#endif
+
+// Check if QtLoader should be added.
+#ifndef NO_QT_LOADER
+    #include "QtLoader.hpp"
+#endif
+
+// Check if Default libfinder is selected.
+#ifndef NO_DEFAULT_LIBFINDER
+    #include "JepluLibFinder.hpp"
+#endif
 
 #include <iostream>
+#include <memory>
 
 /**
  *  \brief Implements and defines the JepluImpl as Pimpl.
@@ -19,9 +31,7 @@ public:
     /**
      *  \brief Default constructor.
      */
-    JepluImpl() :
-    _manager(new PluginManager())
-    {}
+    JepluImpl();
 
     /**
      *  \brief Initializes the PluginFactory and set it up to the Plugin Manager.
@@ -31,15 +41,20 @@ public:
     /**
      *  \brief Initializes the plugin manager.
      */
-    bool initManager(const JepluLibFinder &finder);
+    bool initManager(std::unique_ptr<ILibFinder> finder);
 
     /**
-     *  \brief Register the given proxy into PluginManager.
+     *  \brief Register the given adapter into PluginManager.
      */
-    bool registerProxy(std::shared_ptr<IPluginProxy> proxy);
+    bool registerAdapter(std::shared_ptr<IPluginAdapter> adapter);
 
     /**
-     *  \brief Indicates if any \c IPlugin was loaded into any \c IPluginProxy succesfully.
+     *  \brief Register the given adapter into PluginManager.
+     */
+    bool registerLoader(std::unique_ptr<IPluginLoader> adapter);
+
+    /**
+     *  \brief Indicates if any \c IPlugin was loaded into any \c IPluginAdapter succesfully.
      */
     bool hasLoadedPlugins() const;
 
@@ -48,37 +63,53 @@ private:
      *  \brief Holds a unique pointer to PluginManager.
      */
     std::unique_ptr<PluginManager> _manager;
+
+    /**
+     *  \brief Holds a shared pointer to PluginFactory.
+     */
+    std::shared_ptr<PluginFactory> _factory;
 };
 
 // JepluImpl implementation
 
+Jeplu::JepluImpl::JepluImpl() :
+_manager(new PluginManager()), _factory(new PluginFactory())
+{}
+
 bool Jeplu::JepluImpl::initFactory()
 {
     bool ret = false;
-    std::shared_ptr<PluginFactory> pluginFactory = std::make_shared<PluginFactory>();
 
-// Register DLLoader if it's a linux system.
-#ifdef __linux__
+#ifdef USE_DL_LOADER
+    // Register DLLoader if it's a linux system and it's marked for build.
     std::shared_ptr<DLLoader> dlLoader = std::make_shared<DLLoader>();
-    ret |= pluginFactory->registerLoader(std::dynamic_pointer_cast<IPluginLoader>(dlLoader));
+    ret |= _factory->registerLoader(std::dynamic_pointer_cast<IPluginLoader>(dlLoader));
 #endif
-    // Register QtLoader
+
+#ifndef NO_QT_LOADER
+    // Register QtLoader if marked for build.
     std::shared_ptr<QtLoader> qLoader = std::make_shared<QtLoader>();
-    ret |= pluginFactory->registerLoader(std::dynamic_pointer_cast<IPluginLoader>(qLoader));
+    ret |= _factory->registerLoader(std::dynamic_pointer_cast<IPluginLoader>(qLoader));
+#endif
 
     // Register factory
-    ret &= _manager->registerFactory(pluginFactory);
+    ret &= _manager->registerFactory(_factory);
     return ret;
 }
 
-bool Jeplu::JepluImpl::initManager(const JepluLibFinder &finder)
+bool Jeplu::JepluImpl::initManager(std::unique_ptr<ILibFinder> finder)
 {
-    return _manager->init(finder);
+    return _manager->init(std::move(finder));
 }
 
-bool Jeplu::JepluImpl::registerProxy(std::shared_ptr<IPluginProxy> proxy)
+bool Jeplu::JepluImpl::registerAdapter(std::shared_ptr<IPluginAdapter> adapter)
 {
-    return _manager->registerProxy(proxy);
+    return _manager->registerAdapter(adapter);
+}
+
+bool Jeplu::JepluImpl::registerLoader(std::unique_ptr<IPluginLoader> loader)
+{
+    return _factory->registerLoader(std::move(loader));
 }
 
 bool Jeplu::JepluImpl::hasLoadedPlugins() const
@@ -97,21 +128,33 @@ Jeplu::Jeplu() :
 _impl(new JepluImpl())
 {}
 
-int Jeplu::init(const std::string &pluginsRootPath)
+JepluErrs Jeplu::init(const std::string &pluginsRootPath, std::unique_ptr<ILibFinder> finder)
 {
-    std::cout << "Initializing Jeplu..." << std::endl;
-    int rc = 0;
+    std::cout << "[JEPLU] Initializing Jeplu..." << std::endl;
+    JepluErrs rc = JepluErrs::OK;
     // Initializes and register factory to manager.
     if (!_impl->initFactory())
     {
-        std::cout << "The Plugin Factory could not be initialized or there are no loader available." << std::endl;
+        std::cout << "[JEPLU] The Plugin Factory could not be initialized or there are no loader available." << std::endl;
         return JepluErrs::INIT_FACTORY_ERR;
     }
 
-    JepluLibFinder finder(pluginsRootPath);
-    if (!_impl->initManager(finder))
+    std::unique_ptr<ILibFinder> libFinder(nullptr);
+
+    // Initializes libFinder with JepluLibFinder if it was not excluded for build.
+#ifndef NO_DEFAULT_LIBFINDER
+    libFinder = std::unique_ptr<JepluLibFinder>(new JepluLibFinder(pluginsRootPath));
+#endif
+
+    // If a finder is provided, use it.
+    if (finder)
     {
-        std::cout << "Plugin Manager couldn't be initialized." << std::endl;
+        libFinder = std::move(finder);
+    }
+
+    if (!_impl->initManager(std::move(libFinder)))
+    {
+        std::cout << "[JEPLU] Plugin Manager couldn't be initialized." << std::endl;
         rc = JepluErrs::INIT_MANAGER_ERR;
     }
     return rc;
@@ -122,7 +165,12 @@ bool Jeplu::hasLoadedPlugins() const
     return _impl->hasLoadedPlugins();
 }
 
-bool Jeplu::registerProxy(std::shared_ptr<IPluginProxy> proxy)
+bool Jeplu::registerAdapter(std::shared_ptr<IPluginAdapter> adapter)
 {
-    return _impl->registerProxy(proxy);
+    return _impl->registerAdapter(adapter);
+}
+
+bool Jeplu::registerLoader(std::unique_ptr<IPluginLoader> loader)
+{
+    return _impl->registerLoader(std::move(loader));
 }

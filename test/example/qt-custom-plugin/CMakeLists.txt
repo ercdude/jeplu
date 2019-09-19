@@ -16,13 +16,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_AUTOMOC ON)
 
-################# QT #########################
+# Find Qt
 find_package(Qt5 REQUIRED Core)
-################# QT #########################
+
 # Include jeplu files.
-file (GLOB JEPLU_INCLUDE "../include/*.hpp"
-                         "../include/*.h"
-                         "../custom-proxy/ICustomInterface.hpp")
+file (GLOB JEPLU_INCLUDE "../../../include/*.hpp"
+                         "../../../include/*.h"
+                         "../custom-adapter/ICustomInterface.hpp")
+
+include_directories("../../../include/")
+include_directories("../custom-adapter")
 
 # Add flags to compiler.
 #add_definitions(-[compiler_definition])
@@ -30,8 +33,5 @@ file (GLOB JEPLU_INCLUDE "../include/*.hpp"
 add_library(${PROJECT_NAME} SHARED
 			    "QCustomPlugin.cpp"
 			    ${JEPLU_INCLUDE})
-
-target_include_directories(${PROJECT_NAME} PUBLIC "../include/"
-                                                  "../custom-proxy")
 
 target_link_libraries(${PROJECT_NAME} Qt5::Core)
